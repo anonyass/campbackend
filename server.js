@@ -10,6 +10,7 @@ const sharp = require('sharp');
 const User = require('./models/User');
 const Campgrp = require('./models/Campgrp');
 const Camp = require('./models/Camp'); // Import the Camp model
+const Reservation = require('./models/Reservation');
 
 require('dotenv').config();
 
@@ -341,7 +342,7 @@ app.post('/addCamp', upload.single('campPictureCover'), async (req, res) => {
         if (req.file) {
             // Resize image
             const resizedImageBuffer = await sharp(req.file.buffer)
-                .resize(421, 301)
+                .resize(901, 644)
                 .toBuffer();
 
             const filename = `campPictureCover-${Date.now()}.jpg`;
@@ -422,6 +423,83 @@ app.get('/allCamps', async (req, res) => {
         res.status(200).json(camps);
     } catch (error) {
         res.status(500).json({ message: 'Error fetching camps', error });
+    }
+});
+
+// Reservation endpoint
+app.post('/reserve', async (req, res) => {
+    const { reservationId, campId, campName, date, name, email, reservationDate, totalPrice, selectedExtras, comments } = req.body;
+
+    // Check if the user has already reserved
+    const existingReservation = await Reservation.findOne({ campId, email });
+    if (existingReservation) {
+        return res.status(400).json({ message: 'User has already reserved this camp' });
+    }
+
+    const newReservation = new Reservation({
+        reservationId,
+        campId,
+        campName,
+        date,
+        name,
+        email,
+        reservationDate,
+        totalPrice,
+        selectedExtras,
+        comments,
+    });
+
+    try {
+        await newReservation.save();
+        res.status(201).json({ message: 'Reservation successful' });
+    } catch (error) {
+        res.status(500).json({ message: 'Error making reservation', error });
+    }
+});
+
+// Check reservation status endpoint
+app.get('/check-reservation', async (req, res) => {
+    const { campId, userEmail } = req.query;
+    try {
+        const reservation = await Reservation.findOne({ campId, email: userEmail });
+        if (reservation) {
+            res.status(200).json({ reserved: true });
+        } else {
+            res.status(200).json({ reserved: false });
+        }
+    } catch (error) {
+        res.status(500).json({ message: 'Server error' });
+    }
+});
+
+// Endpoint to get the number of current reservations for a camp
+app.get('/camp-reservations', async (req, res) => {
+    const { campId } = req.query;
+    try {
+        const reservations = await Reservation.countDocuments({ campId });
+        res.status(200).json({ reservations });
+    } catch (error) {
+        res.status(500).json({ message: 'Server error' });
+    }
+});
+
+// Fetch reservations by user email
+app.get('/api/reservations', async (req, res) => {
+    const { email } = req.query;
+
+    if (!email) {
+        return res.status(400).json({ message: 'Email is required' });
+    }
+
+    try {
+        console.log(`Fetching reservations for email: ${email}`);
+        // Find reservations by user email and populate camp data
+        const reservations = await Reservation.find({ email }).populate('campId');
+        console.log('Fetched reservations:', reservations);
+        res.status(200).json(reservations);
+    } catch (error) {
+        console.error('Error fetching reservations:', error);
+        res.status(500).json({ message: 'Server error' });
     }
 });
 
