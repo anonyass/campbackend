@@ -6,8 +6,10 @@ const { google } = require('googleapis');
 const nodemailer = require('nodemailer');
 const multer = require('multer');
 const path = require('path');
+const sharp = require('sharp');
 const User = require('./models/User');
 const Campgrp = require('./models/Campgrp');
+const Camp = require('./models/Camp'); // Import the Camp model
 
 require('dotenv').config();
 
@@ -29,15 +31,7 @@ mongoose.connect('mongodb://localhost:27017/campdb', {
 });
 
 // Multer setup for file uploads
-const storage = multer.diskStorage({
-    destination: function (req, file, cb) {
-        cb(null, 'uploads/');
-    },
-    filename: function (req, file, cb) {
-        cb(null, file.fieldname + '-' + Date.now() + path.extname(file.originalname));
-    }
-});
-
+const storage = multer.memoryStorage(); // Use memory storage to handle image resizing
 const upload = multer({ storage: storage });
 
 // Register endpoint for campers
@@ -108,9 +102,25 @@ app.post('/updateProfile', async (req, res) => {
 
 // Update profile endpoint for Campgrp
 app.post('/updateCampgrpinfos', upload.single('picture'), async (req, res) => {
+    
     try {
         const { email, name, governorate, telephone, chefName, creationDate, socialMediaLink, comments } = req.body;
-        const picture = req.file ? req.file.filename : req.body.picture;
+        let picture = req.body.picture;
+
+        if (req.file) {
+            // Resize image
+            const resizedImageBuffer = await sharp(req.file.buffer)
+                .resize(421, 301)
+                .toBuffer();
+
+            const filename = `picture-${Date.now()}.jpg`;
+            const filepath = path.join('uploads', filename);
+
+            // Save resized image to disk
+            await sharp(resizedImageBuffer).toFile(filepath);
+
+            picture = filename;
+        }
 
         const campgrp = await Campgrp.findOneAndUpdate(
             { email },
@@ -312,10 +322,106 @@ Campspotter Team.
         if (mailResult) {
             res.status(200).json({ message: 'Password recovery email sent' });
         } else {
-            res.status(500).json({ message: 'Error sending email' });
+            res.status  (500).json({ message: 'Error sending email' });
         }
     } catch (error) {
         res.status(500).json({ message: 'Error handling forgot password request' });
+    }
+});
+
+// Add Camp endpoint
+
+app.post('/addCamp', upload.single('campPictureCover'), async (req, res) => {
+    console.log(req.body);
+    console.log(req.file);
+    try {
+        const { title, emplacement, date, duration, groupSize, ages, googleMapUrl, locationMaterials, description, highlights, campgrpEmail, prix, inclusion } = req.body;
+        let campPictureCover = req.body.campPictureCover;
+
+        if (req.file) {
+            // Resize image
+            const resizedImageBuffer = await sharp(req.file.buffer)
+                .resize(421, 301)
+                .toBuffer();
+
+            const filename = `campPictureCover-${Date.now()}.jpg`;
+            const filepath = path.join('uploads', filename);
+
+            // Save resized image to disk
+            await sharp(resizedImageBuffer).toFile(filepath);
+
+            campPictureCover = filename;
+        }
+
+        const newCamp = new Camp({
+            title,
+            emplacement,
+            date,
+            duration,
+            groupSize,
+            ages,
+            googleMapUrl,
+            locationMaterials,
+            description,
+            highlights,
+            campgrpEmail,
+            campPictureCover,
+            prix,
+            inclusion,
+            status: '',
+            reviewScore: 0,
+        });
+        await newCamp.save();
+        res.status(201).json({ message: 'Camp added successfully', camp: newCamp });
+    } catch (error) {
+        console.error('Failed to add camp:', error); // Log the error for debugging
+        res.status(500).json({ message: 'Failed to add camp', error });
+    }
+});
+
+// Get Camps by Campgrp email
+app.get('/campsByCampgrp', async (req, res) => {
+    try {
+        const email = req.query.email;
+        const camps = await Camp.find(
+            { campgrpEmail: email },
+            'campPictureCover title emplacement prix duration reviewScore status date'
+        ).sort({ _id: -1 }); // Sort by _id in descending order
+
+        if (!camps) {
+            return res.status(404).json({ message: 'No camps found for this camping group' });
+        }
+        res.status(200).json(camps);
+    } catch (error) {
+        res.status(500).json({ message: 'Error fetching camps', error });
+    }
+});
+
+// Endpoint to get a single camp by ID
+app.get('/camp/:id', async (req, res) => {
+    try {
+        const camp = await Camp.findById(req.params.id);
+        if (!camp) {
+            return res.status(404).json({ message: 'Camp not found' });
+        }
+        res.json(camp);
+    } catch (error) {
+        res.status(500).json({ message: 'Server error' });
+    }
+});
+
+
+// Get all camps
+app.get('/allCamps', async (req, res) => {
+    try {
+        const camps = await Camp.find({}, 'campPictureCover title emplacement prix duration reviewScore status date').sort({ _id: -1 }); // Sort by _id in descending order
+
+        if (!camps) {
+            return res.status(404).json({ message: 'No camps found' });
+        }
+        res.status(200).json(camps);
+    } catch (error) {
+        res.status(500).json({ message: 'Error fetching camps', error });
     }
 });
 
