@@ -503,6 +503,29 @@ app.get('/api/reservations', async (req, res) => {
     }
 });
 
+// Fetch all camp groups
+app.get('/allCampGroups', async (req, res) => {
+    try {
+        const campGroups = await Campgrp.find();
+        res.json(campGroups);
+    } catch (err) {
+        res.status(500).json({ message: err.message });
+    }
+});
+
+// Endpoint to fetch camp group details by email
+app.get('/campGroup/:email', async (req, res) => {
+    try {
+        const campgrp = await Campgrp.findOne({ email: req.params.email });
+        if (campgrp) {
+            res.status(200).json(campgrp);
+        } else {
+            res.status(404).json({ message: 'Camp group not found' });
+        }
+    } catch (error) {
+        res.status(500).json({ message: 'Server error', error });
+    }
+});
 
 // Start server
 const PORT = process.env.PORT || 5000;
