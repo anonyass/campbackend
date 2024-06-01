@@ -11,6 +11,8 @@ const User = require('./models/User');
 const Campgrp = require('./models/Campgrp');
 const Camp = require('./models/Camp'); // Import the Camp model
 const Reservation = require('./models/Reservation');
+const GrpReview = require('./models/GrpReview'); // Add this line
+
 
 require('dotenv').config();
 
@@ -524,6 +526,54 @@ app.get('/campGroup/:email', async (req, res) => {
         }
     } catch (error) {
         res.status(500).json({ message: 'Server error', error });
+    }
+});
+
+// Add or update a review
+app.post('/addOrUpdateReview', async (req, res) => {
+    const { campGrpEmail, camperEmail, score } = req.body;
+
+    try {
+        let review = await GrpReview.findOne({ campGrpEmail, camperEmail });
+
+        if (review) {
+            review.score = score;
+            await review.save();
+            res.status(200).json({ message: 'Review updated successfully' });
+        } else {
+            review = new GrpReview({ campGrpEmail, camperEmail, score });
+            await review.save();
+            res.status(201).json({ message: 'Review added successfully' });
+        }
+    } catch (error) {
+        res.status(500).json({ message: 'Error adding or updating review', error });
+    }
+});
+
+// Fetch review by camper
+app.get('/getReview', async (req, res) => {
+    const { campGrpEmail, camperEmail } = req.query;
+
+    try {
+        const review = await GrpReview.findOne({ campGrpEmail, camperEmail });
+        if (review) {
+            res.status(200).json(review);
+        } else {
+            res.status(404).json({ message: 'Review not found' });
+        }
+    } catch (error) {
+        res.status(500).json({ message: 'Error fetching review', error });
+    }
+});
+
+// Get reviews for a group
+app.get('/getGroupReviews', async (req, res) => {
+    try {
+        const campGrpEmail = req.query.campGrpEmail;
+        const reviews = await GrpReview.find({ campGrpEmail });
+        res.status(200).json(reviews);
+    } catch (error) {
+        res.status(500).json({ message: 'Error fetching reviews' });
     }
 });
 
