@@ -7,7 +7,7 @@ const CampgrpSchema = new mongoose.Schema({
     governorate: { type: String, required: true },
     password: { type: String, required: true },
     chefName: { type: String, required: true },
-    picture: { type: String },
+    picture: { type: String, required: true },
     creationDate: { type: String, required: true },
     socialMediaLink: { type: String },
     comments: { type: String },

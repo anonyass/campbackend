@@ -240,7 +240,22 @@ Campspotter Team.
 app.post('/registerCampgrp', upload.single('picture'), async (req, res) => {
     try {
         const { name, email, telephone, governorate, chefName, creationDate, socialMediaLink, comments, password } = req.body;
-        const picture = req.file ? req.file.filename : null;
+        let picture = null;
+
+        if (req.file) {
+            // Resize image
+            const resizedImageBuffer = await sharp(req.file.buffer)
+                .resize(421, 301)
+                .toBuffer();
+
+            const filename = `campgrp-${Date.now()}.jpg`;
+            const filepath = path.join(__dirname, 'uploads', filename);
+
+            // Save resized image to disk
+            await sharp(resizedImageBuffer).toFile(filepath);
+
+            picture = filename;
+        }
 
         // Check if email is already registered as a camper
         const existingCamper = await User.findOne({ email });
@@ -577,6 +592,22 @@ app.get('/getGroupReviews', async (req, res) => {
     }
 });
 
+// Cancel group
+app.patch('/camps/:id', async (req, res) => {
+    try {
+        const camp = await Camp.findByIdAndUpdate(
+            req.params.id,
+            { status: req.body.status },
+            { new: true }
+        );
+        if (!camp) {
+            return res.status(404).send('Camp not found');
+        }
+        res.send(camp);
+    } catch (error) {
+        res.status(500).send('Server error');
+    }
+});
 // Start server
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
