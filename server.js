@@ -11,7 +11,8 @@ const User = require('./models/User');
 const Campgrp = require('./models/Campgrp');
 const Camp = require('./models/Camp'); // Import the Camp model
 const Reservation = require('./models/Reservation');
-const GrpReview = require('./models/GrpReview'); // Add this line
+const GrpReview = require('./models/GrpReview'); 
+const CampComment = require('./models/CampComment'); 
 
 
 require('dotenv').config();
@@ -608,6 +609,177 @@ app.patch('/camps/:id', async (req, res) => {
         res.status(500).send('Server error');
     }
 });
+
+
+// Endpoint to add a comment
+app.post('/addComment', async (req, res) => {
+    const { campId, camperEmail, rating, comment } = req.body;
+    try {
+        // Check if the user is a camper
+        const camper = await User.findOne({ email: camperEmail });
+        if (!camper) {
+            return res.status(403).json({ message: 'Only campers can comment and rate' });
+        }
+
+        // Save the comment with the camper's full name
+        const newComment = new CampComment({ campId, camperEmail, camperFullName: camper.fullName, rating, comment });
+        await newComment.save();
+        res.status(201).json({ message: 'Comment added successfully' });
+    } catch (error) {
+        res.status(500).json({ message: 'Error adding comment', error });
+    }
+});
+
+// Endpoint to fetch comments for a camp
+app.get('/comments/:campId', async (req, res) => {
+    try {
+        const comments = await CampComment.find({ campId: req.params.campId });
+        res.status(200).json(comments);
+    } catch (error) {
+        res.status(500).json({ message: 'Error fetching comments', error });
+    }
+});
+
+// Endpoint to Camp score rate
+app.get('/campComments/rating/:campId', async (req, res) => {
+    const campId = req.params.campId;
+    try {
+        const campComments = await CampComment.find({ campId: campId });
+        let totalRating = 0;
+        campComments.forEach(comment => {
+            totalRating += comment.rating;
+        });
+        const averageRating = totalRating / campComments.length;
+        res.json({ rating: averageRating });
+    } catch (error) {
+        console.error('Error fetching camp rating:', error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+});
+
+
+// Fetch all camps by camp group email
+app.get('/api/camps', async (req, res) => {
+    const { campgrpEmail } = req.query;
+    if (!campgrpEmail) {
+        return res.status(400).json({ message: "Camp group email is required" });
+    }
+
+    try {
+        const camps = await Camp.find({ campgrpEmail: campgrpEmail });
+        if (camps.length > 0) {
+            res.status(200).json(camps);
+        } else {
+            res.status(404).json({ message: 'No camps found for this email' });
+        }
+    } catch (error) {
+        console.error('Error fetching camps:', error);
+        res.status(500).json({ message: "Failed to fetch camps", error: error });
+    }
+});
+
+// Endpoint to fetch reservations by campId
+app.get('/api/fetch-reservations', async (req, res) => {
+    const { campId } = req.query;
+    if (!campId) {
+        return res.status(400).json({ message: "Camp ID is required" });
+    }
+
+    try {
+        const reservations = await Reservation.find({ campId: campId });
+        res.status(200).json(reservations);
+    } catch (error) {
+        console.error('Error fetching reservations:', error);
+        res.status(500).json({ message: "Failed to fetch reservations", error: error });
+    }
+});
+
+// Fetch user information by email
+app.get('/api/user-info', async (req, res) => {
+    const { email } = req.query;
+    if (!email) {
+        return res.status(400).json({ message: "Email is required" });
+    }
+
+    try {
+        const user = await User.findOne({ email });
+        if (!user) {
+            return res.status(404).json({ message: "User not found" });
+        }
+        res.status(200).json(user);
+    } catch (error) {
+        console.error('Error fetching user information:', error);
+        res.status(500).json({ message: "Failed to fetch user information", error: error });
+    }
+});
+
+// Reviews Statistics Endpoint
+app.get('/api/reviews/stats', async (req, res) => {
+    const { email } = req.query;
+    try {
+        const reviews = await GrpReview.find({ campGrpEmail: email });
+        const totalReviews = reviews.length;
+        const averageScore = totalReviews > 0 ? reviews.reduce((acc, review) => acc + review.score, 0) / totalReviews : 0;
+        res.status(200).json({ averageScore, totalReviews });
+    } catch (error) {
+        res.status(500).json({ message: 'Error fetching review stats', error });
+    }
+});
+
+// Reservations Statistics Endpoint
+app.get('/api/reservations/stats', async (req, res) => {
+    const { email } = req.query;
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    try {
+        const camps = await Camp.find({ campgrpEmail: email });
+        const campIds = camps.map(camp => camp._id);
+        const totalReservations = await Reservation.countDocuments({ campId: { $in: campIds } });
+        const monthReservations = await Reservation.countDocuments({
+            campId: { $in: campIds },
+            date: { $gte: thirtyDaysAgo }
+        });
+        res.status(200).json({ total: totalReservations, thisMonth: monthReservations });
+    } catch (error) {
+        res.status(500).json({ message: 'Error fetching reservation stats', error });
+    }
+});
+
+// Camps Statistics Endpoint
+app.get('/api/camps/stats', async (req, res) => {
+    const { email } = req.query;
+    const sixMonthsAgo = new Date(Date.now() - 180 * 24 * 60 * 60 * 1000);
+    try {
+        const totalCamps = await Camp.countDocuments({ campgrpEmail: email });
+        const recentCamps = await Camp.countDocuments({
+            campgrpEmail: email,
+            date: { $gte: sixMonthsAgo }
+        });
+        res.status(200).json({ total: totalCamps, recent: recentCamps });
+    } catch (error) {
+        res.status(500).json({ message: 'Error fetching camps stats', error });
+    }
+});
+
+// Revenue Statistics Endpoint
+app.get('/api/revenue/stats', async (req, res) => {
+    const { email } = req.query;
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    try {
+        const camps = await Camp.find({ campgrpEmail: email });
+        const campIds = camps.map(camp => camp._id);
+        const reservations = await Reservation.find({ campId: { $in: campIds } });
+        const totalRevenue = reservations.reduce((acc, res) => acc + res.totalPrice, 0);
+        const monthReservations = await Reservation.find({
+            campId: { $in: campIds },
+            date: { $gte: thirtyDaysAgo }
+        });
+        const monthRevenue = monthReservations.reduce((acc, res) => acc + res.totalPrice, 0);
+        res.status(200).json({ total: totalRevenue, thisMonth: monthRevenue });
+    } catch (error) {
+        res.status(500).json({ message: 'Error fetching revenue stats', error });
+    }
+});
+
 // Start server
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
