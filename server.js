@@ -13,6 +13,8 @@ const Camp = require('./models/Camp'); // Import the Camp model
 const Reservation = require('./models/Reservation');
 const GrpReview = require('./models/GrpReview'); 
 const CampComment = require('./models/CampComment'); 
+const Blog = require('./models/Blog'); // adjust the path as necessary
+const fs = require('fs');
 
 
 require('dotenv').config();
@@ -780,6 +782,111 @@ app.get('/api/revenue/stats', async (req, res) => {
     }
 });
 
+// Blog post endpoint
+// Configure multer storage for blog images
+const blogStorage = multer.diskStorage({
+    destination: function (req, file, cb) {
+        const dir = './uploads/blogimg/';
+        fs.mkdirSync(dir, { recursive: true }); // Ensure the directory exists
+        cb(null, dir);
+    },
+    filename: function (req, file, cb) {
+        cb(null, `${file.fieldname}-${Date.now()}${path.extname(file.originalname)}`);
+    }
+});
+
+// Filter for blog image uploads to ensure only images are uploaded
+const blogImageFilter = (req, file, cb) => {
+    if (file.mimetype.startsWith('image')) {
+        cb(null, true);
+    } else {
+        cb(new Error('Not an image! Please upload only images.'), false);
+    }
+};
+
+// Configure multer for blog image uploads
+const blogUpload = multer({
+    storage: blogStorage,
+    fileFilter: blogImageFilter,
+    limits: {
+        fileSize: 1024 * 1024 * 5 // 5MB
+    }
+});
+
+// Blog post endpoint with custom multer configuration for images
+app.post('/api/blogs', blogUpload.single('coverImage'), async (req, res) => {
+    const { title, description, type, creatorName, articleText, tags, campgrpEmail, likesCount, status } = req.body;
+    if (!title || !description || !articleText || !campgrpEmail || !req.file || !status) {
+        return res.status(400).json({ error: "All fields must be filled, including the cover image and status." });
+    }
+
+    const blog = new Blog({
+        title,
+        description,
+        type,
+        creatorName,
+        articleText,
+        coverImage: req.file.path, // This now stores the path of the image in the blogimg directory
+        tags: tags ? tags.split(',').map(tag => tag.trim()) : [], // Process tags cleanly
+        campgrpEmail,
+        date: new Date(),
+        likesCount: parseInt(likesCount, 10) || 0,
+        status  // Directly using the status as provided, without default
+    });
+
+    try {
+        await blog.save();
+        res.status(201).json({ message: 'Blog added successfully', blogId: blog._id });
+    } catch (error) {
+        console.error("Error saving blog:", error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+
+// Endpoint to fetch the latest three blogs
+app.get('/latestblogs', async (req, res) => {
+    try {
+        const blogs = await Blog.find().sort({ date: -1 }).limit(3);
+        res.json(blogs);
+    } catch (error) {
+        console.error("Failed to fetch blogs:", error);
+        res.status(500).json({ message: 'Failed to fetch blogs', error });
+    }
+});
+
+
+// Endpoint to fetch all blogs
+app.get('/blogs', async (req, res) => {
+    const { type } = req.query;  // Get the type from query parameters
+    try {
+        const query = type ? { type } : {};  // If type is provided, filter by type; otherwise fetch all
+        const blogs = await Blog.find(query).sort({ date: -1 });
+        res.status(200).json(blogs);
+    } catch (error) {
+        console.error('Error fetching blogs:', error);
+        res.status(500).json({ message: 'Failed to fetch blogs' });
+    }
+});
+
+
+// GET blog by ID
+app.get('/api/blogs/:id', async (req, res) => {
+    try {
+        const blog = await Blog.findById(req.params.id);
+        if (!blog) {
+            return res.status(404).json({ message: "Blog not found" });
+        }
+        if (blog.status === "approved") {
+            res.json(blog);
+        } else {
+            res.status(403).json({ message: "Blog is not approved" });
+        }
+    } catch (error) {
+        console.error("Error fetching blog:", error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
 // Start server
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
