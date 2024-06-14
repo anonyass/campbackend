@@ -27,7 +27,7 @@ app.use(cors());
 app.use('/uploads', express.static('uploads')); // Serve static files from the uploads directory
 
 // MongoDB connection
-mongoose.connect('mongodb://localhost:27017/campdb', {
+mongoose.connect('mongodb+srv://anonyasskhatib:CHEJGos2mXI0LnKP@camspotter.cuzancy.mongodb.net/campdb?retryWrites=true&w=majority&appName=camspotter', {
     useNewUrlParser: true,
     useUnifiedTopology: true,
 }).then(() => {
@@ -815,9 +815,12 @@ const blogUpload = multer({
 
 // Blog post endpoint with custom multer configuration for images
 app.post('/api/blogs', blogUpload.single('coverImage'), async (req, res) => {
+    console.log('Received request:', req.body);
+    console.log('Received file:', req.file);
+
     const { title, description, type, creatorName, articleText, tags, campgrpEmail, likesCount, status } = req.body;
-    if (!title || !description || !articleText || !campgrpEmail || !req.file || !status) {
-        return res.status(400).json({ error: "All fields must be filled, including the cover image and status." });
+    if (!title || !description || !articleText || !campgrpEmail || !req.file) {
+        return res.status(400).json({ error: "All fields must be filled, including the cover image." });
     }
 
     const blog = new Blog({
@@ -831,7 +834,7 @@ app.post('/api/blogs', blogUpload.single('coverImage'), async (req, res) => {
         campgrpEmail,
         date: new Date(),
         likesCount: parseInt(likesCount, 10) || 0,
-        status  // Directly using the status as provided, without default
+        status: status || 'pending'  // Set default status to 'pending' if not provided
     });
 
     try {
@@ -844,10 +847,11 @@ app.post('/api/blogs', blogUpload.single('coverImage'), async (req, res) => {
 });
 
 
-// Endpoint to fetch the latest three blogs
+
+// Endpoint to fetch the latest three approved blogs
 app.get('/latestblogs', async (req, res) => {
     try {
-        const blogs = await Blog.find().sort({ date: -1 }).limit(3);
+        const blogs = await Blog.find({ status: 'approved' }).sort({ date: -1 }).limit(3);
         res.json(blogs);
     } catch (error) {
         console.error("Failed to fetch blogs:", error);
@@ -856,11 +860,14 @@ app.get('/latestblogs', async (req, res) => {
 });
 
 
-// Endpoint to fetch all blogs
+// Endpoint to fetch all blogs with optional type filter and only if status is approved
 app.get('/blogs', async (req, res) => {
     const { type } = req.query;  // Get the type from query parameters
     try {
-        const query = type ? { type } : {};  // If type is provided, filter by type; otherwise fetch all
+        const query = { status: 'approved' };  // Filter by approved status
+        if (type) {
+            query.type = type;  // If type is provided, add it to the query
+        }
         const blogs = await Blog.find(query).sort({ date: -1 });
         res.status(200).json(blogs);
     } catch (error) {
@@ -868,6 +875,7 @@ app.get('/blogs', async (req, res) => {
         res.status(500).json({ message: 'Failed to fetch blogs' });
     }
 });
+
 
 
 // GET blog by ID
@@ -887,6 +895,33 @@ app.get('/api/blogs/:id', async (req, res) => {
         res.status(500).json({ error: 'Internal server error' });
     }
 });
+
+
+app.get('/api/blogs', async (req, res) => {
+    try {
+        const { email } = req.query;
+        const blogs = await Blog.find({ campgrpEmail: email });
+        res.json(blogs);
+    } catch (error) {
+        res.status(500).send('Server Error');
+    }
+});
+
+app.put('/api/blogs/:id/cancel', async (req, res) => {
+    try {
+        const { id } = req.params;
+        await Blog.findByIdAndUpdate(id, { status: 'cancelled' });
+        res.send('Blog status updated');
+    } catch (error) {
+        res.status(500).send('Server Error');
+    }
+});
+
+app.get('/', (req, res) => {
+    res.send('Welcome to Campspotter API!');
+});
+
+
 // Start server
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
