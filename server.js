@@ -11,22 +11,23 @@ const User = require('./models/users');
 const Campgrp = require('./models/Campgrp');
 const Camp = require('./models/Camp'); // Import the Camp model
 const Reservation = require('./models/Reservation');
-const GrpReview = require('./models/GrpReview'); 
-const CampComment = require('./models/CampComment'); 
+const GrpReview = require('./models/GrpReview');
+const CampComment = require('./models/CampComment');
 const Blog = require('./models/Blog'); // adjust the path as necessary
 const fs = require('fs');
-
-
+const cloudinary = require('cloudinary').v2;
+const { CloudinaryStorage } = require('multer-storage-cloudinary');
 require('dotenv').config();
 
 const app = express();
+
 // Middleware
 app.use(bodyParser.json());
 app.use(cors());
 app.use('/uploads', express.static('uploads')); // Serve static files from the uploads directory
 
 // MongoDB connection
-mongoose.connect('mongodb+srv://anonyasskhatib:CHEJGos2mXI0LnKP@camspotter.cuzancy.mongodb.net/campdb?retryWrites=true&w=majority&appName=camspotter', {
+mongoose.connect(process.env.MONGO_URI, {
     useNewUrlParser: true,
     useUnifiedTopology: true,
 }).then(() => {
@@ -35,8 +36,22 @@ mongoose.connect('mongodb+srv://anonyasskhatib:CHEJGos2mXI0LnKP@camspotter.cuzan
     console.error('Connection error', error);
 });
 
-// Multer setup for file uploads
-const storage = multer.memoryStorage(); // Use memory storage to handle image resizing
+// Cloudinary configuration
+cloudinary.config({
+    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+    api_key: process.env.CLOUDINARY_API_KEY,
+    api_secret: process.env.CLOUDINARY_API_SECRET,
+});
+
+// Multer setup for file uploads to Cloudinary
+const storage = new CloudinaryStorage({
+    cloudinary: cloudinary,
+    params: {
+        folder: 'uploads',
+        format: async (req, file) => 'jpg', // supports promises as well
+        public_id: (req, file) => Date.now().toString() + '-' + file.originalname,
+    },
+});
 const upload = multer({ storage: storage });
 
 // Register endpoint for campers
@@ -107,24 +122,12 @@ app.post('/updateProfile', async (req, res) => {
 
 // Update profile endpoint for Campgrp
 app.post('/updateCampgrpinfos', upload.single('picture'), async (req, res) => {
-    
     try {
         const { email, name, governorate, telephone, chefName, creationDate, socialMediaLink, comments } = req.body;
         let picture = req.body.picture;
 
         if (req.file) {
-            // Resize image
-            const resizedImageBuffer = await sharp(req.file.buffer)
-                .resize(421, 301)
-                .toBuffer();
-
-            const filename = `picture-${Date.now()}.jpg`;
-            const filepath = path.join('uploads', filename);
-
-            // Save resized image to disk
-            await sharp(resizedImageBuffer).toFile(filepath);
-
-            picture = filename;
+            picture = req.file.path;
         }
 
         const campgrp = await Campgrp.findOneAndUpdate(
@@ -245,18 +248,7 @@ app.post('/registerCampgrp', upload.single('picture'), async (req, res) => {
         let picture = null;
 
         if (req.file) {
-            // Resize image
-            const resizedImageBuffer = await sharp(req.file.buffer)
-                .resize(421, 301)
-                .toBuffer();
-
-            const filename = `campgrp-${Date.now()}.jpg`;
-            const filepath = path.join(__dirname, 'uploads', filename);
-
-            // Save resized image to disk
-            await sharp(resizedImageBuffer).toFile(filepath);
-
-            picture = filename;
+            picture = req.file.path;
         }
 
         // Check if email is already registered as a camper
@@ -342,7 +334,7 @@ Campspotter Team.
         if (mailResult) {
             res.status(200).json({ message: 'Password recovery email sent' });
         } else {
-            res.status  (500).json({ message: 'Error sending email' });
+            res.status(500).json({ message: 'Error sending email' });
         }
     } catch (error) {
         res.status(500).json({ message: 'Error handling forgot password request' });
@@ -350,7 +342,6 @@ Campspotter Team.
 });
 
 // Add Camp endpoint
-
 app.post('/addCamp', upload.single('campPictureCover'), async (req, res) => {
     console.log(req.body);
     console.log(req.file);
@@ -359,18 +350,7 @@ app.post('/addCamp', upload.single('campPictureCover'), async (req, res) => {
         let campPictureCover = req.body.campPictureCover;
 
         if (req.file) {
-            // Resize image
-            const resizedImageBuffer = await sharp(req.file.buffer)
-                .resize(901, 644)
-                .toBuffer();
-
-            const filename = `campPictureCover-${Date.now()}.jpg`;
-            const filepath = path.join('uploads', filename);
-
-            // Save resized image to disk
-            await sharp(resizedImageBuffer).toFile(filepath);
-
-            campPictureCover = filename;
+            campPictureCover = req.file.path;
         }
 
         const newCamp = new Camp({
@@ -429,7 +409,6 @@ app.get('/camp/:id', async (req, res) => {
         res.status(500).json({ message: 'Server error' });
     }
 });
-
 
 // Get all camps
 app.get('/allCamps', async (req, res) => {
@@ -611,7 +590,6 @@ app.patch('/camps/:id', async (req, res) => {
     }
 });
 
-
 // Endpoint to add a comment
 app.post('/addComment', async (req, res) => {
     const { campId, camperEmail, rating, comment } = req.body;
@@ -657,7 +635,6 @@ app.get('/campComments/rating/:campId', async (req, res) => {
         res.status(500).json({ error: 'Internal Server Error' });
     }
 });
-
 
 // Fetch all camps by camp group email
 app.get('/api/camps', async (req, res) => {
@@ -845,8 +822,6 @@ app.post('/api/blogs', blogUpload.single('coverImage'), async (req, res) => {
     }
 });
 
-
-
 // Endpoint to fetch the latest three approved blogs
 app.get('/latestblogs', async (req, res) => {
     try {
@@ -857,7 +832,6 @@ app.get('/latestblogs', async (req, res) => {
         res.status(500).json({ message: 'Failed to fetch blogs', error });
     }
 });
-
 
 // Endpoint to fetch all blogs with optional type filter and only if status is approved
 app.get('/blogs', async (req, res) => {
@@ -874,8 +848,6 @@ app.get('/blogs', async (req, res) => {
         res.status(500).json({ message: 'Failed to fetch blogs' });
     }
 });
-
-
 
 // GET blog by ID
 app.get('/api/blogs/:id', async (req, res) => {
@@ -894,7 +866,6 @@ app.get('/api/blogs/:id', async (req, res) => {
         res.status(500).json({ error: 'Internal server error' });
     }
 });
-
 
 app.get('/api/blogs', async (req, res) => {
     try {
@@ -919,7 +890,6 @@ app.put('/api/blogs/:id/cancel', async (req, res) => {
 app.get('/', (req, res) => {
     res.send('Welcome to Campspotter API!');
 });
-
 
 // Start server
 const PORT = process.env.PORT || 5000;
