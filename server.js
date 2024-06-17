@@ -52,7 +52,7 @@ const storage = new CloudinaryStorage({
     },
 });
 const upload = multer({ storage: storage });
-const bcrypt = require('bcrypt');
+const bcrypt = require('bcryptjs');
 const saltRounds = 10;
 // Register endpoint for campers
 app.post('/register', async (req, res) => {
