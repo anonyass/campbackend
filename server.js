@@ -87,7 +87,16 @@ app.post('/init-register', async (req, res) => {
         console.log(`Generated verification code: ${verificationCode} for email: ${email}`);
         console.log(`Stored verification data: ${JSON.stringify(verificationData)}`);
 
-        await sendMail(email, 'Verification Code', `Your verification code is: ${verificationCode}`);
+        const emailContent = `
+            <p>Hello ${fullName},</p>
+            <p>Thank you for registering with Campspotter. To complete your registration, please use the following verification code:</p>
+            <h2 style="color: #2e6c80;">${verificationCode}</h2>
+            <p>This code is valid for the next 10 minutes. If you did not request this, please ignore this email.</p>
+            <p>Best regards,</p>
+            <p>The Campspotter Team</p>
+        `;
+
+        await sendMail(email, 'Campspotter Verification Code', emailContent);
 
         res.status(200).json({ message: 'Verification code sent' });
     } catch (error) {
@@ -95,6 +104,7 @@ app.post('/init-register', async (req, res) => {
         res.status(500).json({ message: 'Error initiating registration' });
     }
 });
+
 
 app.post('/verify', async (req, res) => {
     try {
@@ -138,6 +148,92 @@ app.post('/verify', async (req, res) => {
     }
 });
 
+// Register endpoint for campgrp
+app.post('/init-registerCampgrp', async (req, res) => {
+    try {
+        const { name, email, telephone, governorate, chefName, creationDate, socialMediaLink, comments, password } = req.body;
+
+        if (!name || !email || !telephone || !governorate || !chefName || !creationDate || !socialMediaLink || !comments || !password) {
+            return res.status(400).json({ message: 'All fields are required' });
+        }
+
+        const existingUser = await User.findOne({ email });
+        const existingCampgrp = await Campgrp.findOne({ email });
+        if (existingUser || existingCampgrp) {
+            return res.status(400).json({ message: 'Email already exists' });
+        }
+
+        const verificationCode = Math.floor(1000 + Math.random() * 9000).toString();
+        verificationData[email] = { code: verificationCode, attempts: 0 };
+
+        console.log(`Generated verification code: ${verificationCode} for email: ${email}`);
+        console.log(`Stored verification data: ${JSON.stringify(verificationData)}`);
+
+        const emailContent = `
+            <p>Hello ${chefName},</p>
+            <p>Thank you for registering your camping group, ${name}, with Campspotter. To complete your registration, please use the following verification code:</p>
+            <h2 style="color: #2e6c80;">${verificationCode}</h2>
+            <p>This code is valid for the next 10 minutes. If you did not request this, please ignore this email.</p>
+            <p>Best regards,</p>
+            <p>The Campspotter Team</p>
+        `;
+
+        await sendMail(email, 'Campspotter Verification Code', emailContent);
+
+        res.status(200).json({ message: 'Verification code sent' });
+    } catch (error) {
+        console.error('Error initiating registration:', error);
+        res.status(500).json({ message: 'Error initiating registration' });
+    }
+});
+
+
+app.post('/verifyCampgrp', upload.single('picture'), async (req, res) => {
+    try {
+        const { verificationCode, name, email, telephone, governorate, chefName, creationDate, socialMediaLink, comments, password } = req.body;
+        const storedData = verificationData[email];
+
+        if (!storedData) {
+            console.log(`Verification data not found for email: ${email}`);
+            return res.status(400).json({ message: 'No verification code found. Please start the registration process again.' });
+        }
+
+        const { code, attempts } = storedData;
+        if (attempts >= 3) {
+            delete verificationData[email];
+            console.log(`Maximum attempts reached for email: ${email}`);
+            return res.status(400).json({ message: 'Maximum attempts reached. Please start the registration process again.' });
+        }
+
+        if (verificationCode !== code) {
+            verificationData[email].attempts += 1;
+            console.log(`Incorrect verification code entered for email: ${email}`);
+            return res.status(400).json({ message: 'Verification code is incorrect' });
+        }
+
+        if (!name || !email || !telephone || !governorate || !chefName || !creationDate || !socialMediaLink || !comments || !password) {
+            return res.status(400).json({ message: 'All fields are required' });
+        }
+
+        let picture = null;
+        if (req.file) {
+            picture = req.file.path;
+        }
+
+        const hashedPassword = await bcrypt.hash(password, 10);
+        const newCampgrp = new Campgrp({ name, email, telephone, governorate, chefName, picture, creationDate, socialMediaLink, comments, password: hashedPassword });
+        await newCampgrp.save();
+
+        delete verificationData[email];
+
+        res.status(201).json({ message: 'Camping group registered successfully' });
+    } catch (error) {
+        console.error('Error verifying camping group:', error);
+        if (!res.headersSent) {
+            res.status(500).json({ message: 'Error verifying camping group' });
+        }
+    }
+});
 
 
 // Login endpoint for campers
@@ -345,7 +441,8 @@ app.post('/loginCampgrp', async (req, res) => {
         if (!campgrp) {
             return res.status(400).json({ message: 'Email does not exist' });
         }
-        if (campgrp.password !== password) { // For a more secure app, use hashed passwords with bcrypt
+        const isPasswordValid = await bcrypt.compare(password, campgrp.password);
+        if (!isPasswordValid) {
             return res.status(400).json({ message: 'Email or password is incorrect' });
         }
         res.status(200).json({ name: campgrp.name, email: campgrp.email, governorate: campgrp.governorate, telephone: campgrp.telephone, chefName: campgrp.chefName, picture: campgrp.picture, creationDate: campgrp.creationDate, socialMediaLink: campgrp.socialMediaLink, comments: campgrp.comments });
@@ -353,6 +450,7 @@ app.post('/loginCampgrp', async (req, res) => {
         res.status(500).json({ message: 'Error logging in' });
     }
 });
+
 
 // Camping group info endpoint
 app.get('/campgrpInfo', async (req, res) => {
@@ -378,7 +476,7 @@ app.get('/forgotPasswordCampgrp', async (req, res) => {
         }
 
         const subject = 'Campspotter - Password Recovery';
-        const text = `Hi ${campgrp.chefName} - ${campgrp.name} ,
+        const text = `Hi ${campgrp.chefName} - ${campgrp.name},
 
 As per your request, we have recovered your account password. Here are your login details:
 
@@ -403,6 +501,7 @@ Campspotter Team.
         res.status(500).json({ message: 'Error handling forgot password request' });
     }
 });
+
 
 // Add Camp endpoint
 app.post('/addCamp', upload.single('campPictureCover'), async (req, res) => {
