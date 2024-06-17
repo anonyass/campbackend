@@ -52,12 +52,17 @@ const storage = new CloudinaryStorage({
     },
 });
 const upload = multer({ storage: storage });
-
+const bcrypt = require('bcrypt');
+const saltRounds = 10;
 // Register endpoint for campers
 app.post('/register', async (req, res) => {
     try {
         const { fullName, email, telephone, governorate, password } = req.body;
-        const newUser = new User({ fullName, email, telephone, governorate, password });
+        if (!fullName || !email || !telephone || !governorate || !password) {
+            return res.status(400).json({ message: 'All fields are required' });
+        }
+        const hashedPassword = await bcrypt.hash(password, saltRounds);
+        const newUser = new User({ fullName, email, telephone, governorate, password: hashedPassword });
         await newUser.save();
         res.status(201).json({ message: 'User registered successfully' });
     } catch (error) {
@@ -69,6 +74,7 @@ app.post('/register', async (req, res) => {
     }
 });
 
+
 // Login endpoint for campers
 app.post('/login', async (req, res) => {
     try {
@@ -77,7 +83,8 @@ app.post('/login', async (req, res) => {
         if (!user) {
             return res.status(400).json({ message: 'Email does not exist' });
         }
-        if (user.password !== password) { // For a more secure app, use hashed passwords with bcrypt
+        const isPasswordValid = await bcrypt.compare(password, user.password);
+        if (!isPasswordValid) {
             return res.status(400).json({ message: 'Email or password is incorrect' });
         }
         res.status(200).json({ fullName: user.fullName, email: user.email, governorate: user.governorate, telephone: user.telephone });
@@ -85,6 +92,7 @@ app.post('/login', async (req, res) => {
         res.status(500).json({ message: 'Error logging in' });
     }
 });
+
 
 // User info endpoint
 app.get('/userinfo', async (req, res) => {
@@ -144,7 +152,7 @@ app.post('/updateCampgrpinfos', upload.single('picture'), async (req, res) => {
     }
 });
 
-// Change password endpoint
+// Update password endpoint
 app.post('/changePassword', async (req, res) => {
     try {
         const { email, oldPassword, newPassword } = req.body;
@@ -152,10 +160,12 @@ app.post('/changePassword', async (req, res) => {
         if (!user) {
             return res.status(404).json({ message: 'User not found' });
         }
-        if (user.password !== oldPassword) { // For a more secure app, use hashed passwords with bcrypt
+        const isOldPasswordValid = await bcrypt.compare(oldPassword, user.password);
+        if (!isOldPasswordValid) {
             return res.status(400).json({ message: 'Old password is incorrect' });
         }
-        user.password = newPassword; // Ensure you hash the new password if using bcrypt
+        const hashedNewPassword = await bcrypt.hash(newPassword, saltRounds);
+        user.password = hashedNewPassword;
         await user.save();
         res.status(200).json({ message: 'Password changed successfully' });
     } catch (error) {
@@ -239,40 +249,101 @@ Campspotter Team.
         res.status(500).json({ message: 'Error handling forgot password request' });
     }
 });
+const userSchema = new mongoose.Schema({
+    fullName: String,
+    email: { type: String, unique: true },
+    telephone: String,
+    governorate: String,
+    password: String,
+    verificationCode: String,
+    isVerified: { type: Boolean, default: false },
+});
+const tempUserSchema = new mongoose.Schema({
+    fullName: String,
+    email: String,
+    telephone: String,
+    governorate: String,
+    password: String,
+    verificationCode: String,
+});
+const TempUser = mongoose.model('TempUser', tempUserSchema);
 
-// Register endpoint for Campgrp
-app.post('/registerCampgrp', upload.single('picture'), async (req, res) => {
+// Initial registration endpoint
+app.post('/init-register', async (req, res) => {
     try {
-        const { name, email, telephone, governorate, chefName, creationDate, socialMediaLink, comments, password } = req.body;
-        let picture = null;
-
-        if (req.file) {
-            picture = req.file.path;
+        const { fullName, email, telephone, governorate, password } = req.body;
+        if (!fullName || !email || !telephone || !governorate || !password) {
+            return res.status(400).json({ message: 'All fields are required' });
         }
 
-        // Check if email is already registered as a camper
-        const existingCamper = await User.findOne({ email });
-        if (existingCamper) {
-            return res.status(400).json({ message: 'Email already registered as a camper' });
-        }
-
-        const existingCampgrp = await Campgrp.findOne({ email });
-        if (existingCampgrp) {
+        // Check if the email already exists in User collection
+        const existingUser = await User.findOne({ email });
+        if (existingUser) {
             return res.status(400).json({ message: 'Email already exists' });
         }
 
-        const newCampgrp = new Campgrp({ name, email, telephone, governorate, chefName, picture, creationDate, socialMediaLink, comments, password });
-        await newCampgrp.save();
-        res.status(201).json({ message: 'Camping group registered successfully' });
+        // Generate verification code
+        const verificationCode = Math.floor(1000 + Math.random() * 9000).toString();
+
+        // Save the temp user data
+        const tempUser = new TempUser({ fullName, email, telephone, governorate, password, verificationCode });
+        await tempUser.save();
+
+        // Send verification email
+        const subject = 'Campspotter - Email Verification';
+        const text = `Hi ${fullName},
+
+Your verification code is: ${verificationCode}
+
+Please enter this code in the application to verify your email.
+
+Best regards,
+Campspotter Team.`;
+
+        await sendMail(email, subject, text);
+
+        res.status(200).json({ message: 'Verification code sent to email.', email });
     } catch (error) {
-        if (error.code === 11000) { // Duplicate key error
-            res.status(400).json({ message: 'Email already exists' });
-        } else {
-            res.status(500).json({ message: 'Error registering camping group' });
-        }
+        res.status(500).json({ message: 'Error initiating registration' });
     }
 });
 
+// Verification endpoint
+app.post('/verify', async (req, res) => {
+    try {
+        const { email, verificationCode } = req.body;
+        const tempUser = await TempUser.findOne({ email });
+
+        if (!tempUser) {
+            return res.status(404).json({ message: 'User not found' });
+        }
+
+        if (tempUser.verificationCode !== verificationCode) {
+            return res.status(400).json({ message: 'Verification code is incorrect' });
+        }
+
+        // Hash the password
+        const hashedPassword = await bcrypt.hash(tempUser.password, saltRounds);
+
+        // Save the user to the User collection
+        const newUser = new User({
+            fullName: tempUser.fullName,
+            email: tempUser.email,
+            telephone: tempUser.telephone,
+            governorate: tempUser.governorate,
+            password: hashedPassword,
+            isVerified: true,
+        });
+        await newUser.save();
+
+        // Delete the temp user data
+        await TempUser.deleteOne({ email });
+
+        res.status(200).json({ message: 'Email verified and user registered successfully' });
+    } catch (error) {
+        res.status(500).json({ message: 'Error verifying email' });
+    }
+});
 // Login endpoint for Campgrp
 app.post('/loginCampgrp', async (req, res) => {
     try {
