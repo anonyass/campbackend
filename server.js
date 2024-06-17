@@ -19,6 +19,11 @@ const cloudinary = require('cloudinary').v2;
 const { CloudinaryStorage } = require('multer-storage-cloudinary');
 require('dotenv').config();
 const app = express();
+const session = require('express-session');
+const MongoStore = require('connect-mongo');
+
+
+
 
 // Middleware
 app.use(bodyParser.json());
@@ -34,6 +39,11 @@ mongoose.connect(process.env.MONGO_URI, {
 }).catch((error) => {
     console.error('Connection error', error);
 });
+
+
+
+const verificationData = {}; // In-memory storage for verification codes
+
 
 // Cloudinary configuration
 cloudinary.config({
@@ -54,25 +64,80 @@ const storage = new CloudinaryStorage({
 const upload = multer({ storage: storage });
 const bcrypt = require('bcryptjs');
 const saltRounds = 10;
+
+
+
 // Register endpoint for campers
-app.post('/register', async (req, res) => {
+app.post('/init-register', async (req, res) => {
     try {
         const { fullName, email, telephone, governorate, password } = req.body;
+
         if (!fullName || !email || !telephone || !governorate || !password) {
             return res.status(400).json({ message: 'All fields are required' });
         }
-        const hashedPassword = await bcrypt.hash(password, saltRounds);
+
+        const existingUser = await User.findOne({ email });
+        if (existingUser) {
+            return res.status(400).json({ message: 'Email already exists' });
+        }
+
+        const verificationCode = Math.floor(1000 + Math.random() * 9000).toString();
+        verificationData[email] = { code: verificationCode, attempts: 0 };
+
+        console.log(`Generated verification code: ${verificationCode} for email: ${email}`);
+        console.log(`Stored verification data: ${JSON.stringify(verificationData)}`);
+
+        await sendMail(email, 'Verification Code', `Your verification code is: ${verificationCode}`);
+
+        res.status(200).json({ message: 'Verification code sent' });
+    } catch (error) {
+        console.error('Error initiating registration:', error);
+        res.status(500).json({ message: 'Error initiating registration' });
+    }
+});
+
+app.post('/verify', async (req, res) => {
+    try {
+        const { verificationCode, fullName, email, telephone, governorate, password } = req.body;
+        const storedData = verificationData[email];
+
+        if (!storedData) {
+            console.log(`Verification data not found for email: ${email}`);
+            return res.status(400).json({ message: 'No verification code found. Please start the registration process again.' });
+        }
+
+        const { code, attempts } = storedData;
+        if (attempts >= 3) {
+            delete verificationData[email];
+            console.log(`Maximum attempts reached for email: ${email}`);
+            return res.status(400).json({ message: 'Maximum attempts reached. Please start the registration process again.' });
+        }
+
+        if (verificationCode !== code) {
+            verificationData[email].attempts += 1;
+            console.log(`Incorrect verification code entered for email: ${email}`);
+            return res.status(400).json({ message: 'Verification code is incorrect' });
+        }
+
+        if (!fullName || !email || !telephone || !governorate || !password) {
+            return res.status(400).json({ message: 'All fields are required' });
+        }
+
+        const hashedPassword = await bcrypt.hash(password, 10);
         const newUser = new User({ fullName, email, telephone, governorate, password: hashedPassword });
         await newUser.save();
+
+        delete verificationData[email];
+
         res.status(201).json({ message: 'User registered successfully' });
     } catch (error) {
-        if (error.code === 11000) { // Duplicate key error
-            res.status(400).json({ message: 'Email already exists' });
-        } else {
-            res.status(500).json({ message: 'Error registering user' });
+        console.error('Error verifying user:', error);
+        if (!res.headersSent) {
+            res.status(500).json({ message: 'Error verifying user' });
         }
     }
 });
+
 
 
 // Login endpoint for campers
@@ -249,6 +314,8 @@ Campspotter Team.
         res.status(500).json({ message: 'Error handling forgot password request' });
     }
 });
+
+
 const userSchema = new mongoose.Schema({
     fullName: String,
     email: { type: String, unique: true },
@@ -268,82 +335,8 @@ const tempUserSchema = new mongoose.Schema({
 });
 const TempUser = mongoose.model('TempUser', tempUserSchema);
 
-// Initial registration endpoint
-app.post('/init-register', async (req, res) => {
-    try {
-        const { fullName, email, telephone, governorate, password } = req.body;
-        if (!fullName || !email || !telephone || !governorate || !password) {
-            return res.status(400).json({ message: 'All fields are required' });
-        }
 
-        // Check if the email already exists in User collection
-        const existingUser = await User.findOne({ email });
-        if (existingUser) {
-            return res.status(400).json({ message: 'Email already exists' });
-        }
 
-        // Generate verification code
-        const verificationCode = Math.floor(1000 + Math.random() * 9000).toString();
-
-        // Save the temp user data
-        const tempUser = new TempUser({ fullName, email, telephone, governorate, password, verificationCode });
-        await tempUser.save();
-
-        // Send verification email
-        const subject = 'Campspotter - Email Verification';
-        const text = `Hi ${fullName},
-
-Your verification code is: ${verificationCode}
-
-Please enter this code in the application to verify your email.
-
-Best regards,
-Campspotter Team.`;
-
-        await sendMail(email, subject, text);
-
-        res.status(200).json({ message: 'Verification code sent to email.', email });
-    } catch (error) {
-        res.status(500).json({ message: 'Error initiating registration' });
-    }
-});
-
-// Verification endpoint
-app.post('/verify', async (req, res) => {
-    try {
-        const { email, verificationCode } = req.body;
-        const tempUser = await TempUser.findOne({ email });
-
-        if (!tempUser) {
-            return res.status(404).json({ message: 'User not found' });
-        }
-
-        if (tempUser.verificationCode !== verificationCode) {
-            return res.status(400).json({ message: 'Verification code is incorrect' });
-        }
-
-        // Hash the password
-        const hashedPassword = await bcrypt.hash(tempUser.password, saltRounds);
-
-        // Save the user to the User collection
-        const newUser = new User({
-            fullName: tempUser.fullName,
-            email: tempUser.email,
-            telephone: tempUser.telephone,
-            governorate: tempUser.governorate,
-            password: hashedPassword,
-            isVerified: true,
-        });
-        await newUser.save();
-
-        // Delete the temp user data
-        await TempUser.deleteOne({ email });
-
-        res.status(200).json({ message: 'Email verified and user registered successfully' });
-    } catch (error) {
-        res.status(500).json({ message: 'Error verifying email' });
-    }
-});
 // Login endpoint for Campgrp
 app.post('/loginCampgrp', async (req, res) => {
     try {
