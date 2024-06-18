@@ -502,6 +502,31 @@ Campspotter Team.
     }
 });
 
+/// Update password endpoint for Campgrp
+app.post('/updatePasswordgrp', async (req, res) => {
+    try {
+        const { email, oldPassword, newPassword } = req.body;
+        const campgrp = await Campgrp.findOne({ email });
+
+        if (!campgrp) {
+            return res.status(404).json({ message: 'Camping group not found' });
+        }
+
+        const isOldPasswordValid = await bcrypt.compare(oldPassword, campgrp.password);
+        if (!isOldPasswordValid) {
+            return res.status(400).json({ message: 'Old password is incorrect' });
+        }
+
+        const hashedNewPassword = await bcrypt.hash(newPassword, saltRounds);
+        campgrp.password = hashedNewPassword;
+        await campgrp.save();
+
+        res.status(200).json({ message: 'Password changed successfully' });
+    } catch (error) {
+        res.status(500).json({ message: 'Error changing password' });
+    }
+});
+
 
 // Add Camp endpoint
 app.post('/addCamp', upload.single('campPictureCover'), async (req, res) => {
