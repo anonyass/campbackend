@@ -6,6 +6,8 @@ const userSchema = new mongoose.Schema({
     telephone: { type: String, required: true },
     governorate: { type: String, required: true },
     password: { type: String, required: true },
+    temporaryPassword: { type: String },
+    temporaryPasswordExpires: { type: Date }
 });
 
 const User = mongoose.model('User', userSchema);

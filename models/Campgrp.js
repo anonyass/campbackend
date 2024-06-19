@@ -11,6 +11,8 @@ const CampgrpSchema = new mongoose.Schema({
     creationDate: { type: String, required: true },
     socialMediaLink: { type: String },
     comments: { type: String },
+    temporaryPassword: { type: String },
+    temporaryPasswordExpires: { type: Date },
 });
 
 module.exports = mongoose.model('Campgrp', CampgrpSchema);

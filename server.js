@@ -65,7 +65,7 @@ const upload = multer({ storage: storage });
 const bcrypt = require('bcryptjs');
 const saltRounds = 10;
 
-
+const crypto = require('crypto');
 
 // Register endpoint for campers
 app.post('/init-register', async (req, res) => {
@@ -234,8 +234,6 @@ app.post('/verifyCampgrp', upload.single('picture'), async (req, res) => {
         }
     }
 });
-
-
 // Login endpoint for campers
 app.post('/login', async (req, res) => {
     try {
@@ -244,16 +242,24 @@ app.post('/login', async (req, res) => {
         if (!user) {
             return res.status(400).json({ message: 'Email does not exist' });
         }
-        const isPasswordValid = await bcrypt.compare(password, user.password);
+
+        let isPasswordValid = await bcrypt.compare(password, user.password);
+
+        // Check if the temporary password is valid
+        if (!isPasswordValid && user.temporaryPassword && user.temporaryPasswordExpires > Date.now()) {
+            isPasswordValid = await bcrypt.compare(password, user.temporaryPassword);
+        }
+
         if (!isPasswordValid) {
             return res.status(400).json({ message: 'Email or password is incorrect' });
         }
+
         res.status(200).json({ fullName: user.fullName, email: user.email, governorate: user.governorate, telephone: user.telephone });
     } catch (error) {
+        console.error('Error logging in:', error);
         res.status(500).json({ message: 'Error logging in' });
     }
 });
-
 
 // User info endpoint
 app.get('/userinfo', async (req, res) => {
@@ -321,18 +327,29 @@ app.post('/changePassword', async (req, res) => {
         if (!user) {
             return res.status(404).json({ message: 'User not found' });
         }
-        const isOldPasswordValid = await bcrypt.compare(oldPassword, user.password);
+
+        let isOldPasswordValid = await bcrypt.compare(oldPassword, user.password);
+
+        // Check if the temporary password is valid
+        if (!isOldPasswordValid && user.temporaryPassword && user.temporaryPasswordExpires > Date.now()) {
+            isOldPasswordValid = await bcrypt.compare(oldPassword, user.temporaryPassword);
+        }
+
         if (!isOldPasswordValid) {
             return res.status(400).json({ message: 'Old password is incorrect' });
         }
+
         const hashedNewPassword = await bcrypt.hash(newPassword, saltRounds);
         user.password = hashedNewPassword;
+        user.temporaryPassword = undefined; // Remove temporary password
+        user.temporaryPasswordExpires = undefined; // Remove temporary password expiration
         await user.save();
         res.status(200).json({ message: 'Password changed successfully' });
     } catch (error) {
         res.status(500).json({ message: 'Error changing password' });
     }
 });
+
 
 // OAuth2 setup
 const CLIENT_ID = process.env.CLIENT_ID;
@@ -376,23 +393,39 @@ async function sendMail(email, subject, text) {
 }
 
 // Forgot Password endpoint
+
+
+// Forgot Password endpoint
 app.get('/forgotPassword', async (req, res) => {
     try {
         const { email } = req.query;
+        if (!email) {
+            return res.status(400).json({ message: 'Email is required' });
+        }
+
         const user = await User.findOne({ email });
         if (!user) {
             return res.status(404).json({ message: 'User Email not found' });
         }
 
+        // Generate a temporary password and hash it
+        const temporaryPassword = crypto.randomBytes(4).toString('hex');
+        const hashedTemporaryPassword = await bcrypt.hash(temporaryPassword, saltRounds);
+
+        // Set temporary password and expiration (3 minutes)
+        user.temporaryPassword = hashedTemporaryPassword;
+        user.temporaryPasswordExpires = Date.now() + 3 * 60 * 1000; // 3 minutes from now
+        await user.save();
+
         const subject = 'Campspotter - Password Recovery';
         const text = `Hi ${user.fullName},
 
-As per your request, we have recovered your account password. Here are your login details:
+As per your request, we have generated a temporary password for your account. Here are your login details:
 
 Email: ${user.email}
-Password: ${user.password}
+Temporary Password: ${temporaryPassword}
 
-For security reasons, we recommend that you log in and change your password immediately.
+This temporary password is valid for 3 minutes. Please log in and change your password immediately.
 
 If you did not request this, please contact our support team immediately.
 
@@ -407,6 +440,7 @@ Campspotter Team.
             res.status(500).json({ message: 'Error sending email' });
         }
     } catch (error) {
+        console.error('Error handling forgot password request:', error);
         res.status(500).json({ message: 'Error handling forgot password request' });
     }
 });
@@ -431,8 +465,6 @@ const tempUserSchema = new mongoose.Schema({
 });
 const TempUser = mongoose.model('TempUser', tempUserSchema);
 
-
-
 // Login endpoint for Campgrp
 app.post('/loginCampgrp', async (req, res) => {
     try {
@@ -441,15 +473,33 @@ app.post('/loginCampgrp', async (req, res) => {
         if (!campgrp) {
             return res.status(400).json({ message: 'Email does not exist' });
         }
-        const isPasswordValid = await bcrypt.compare(password, campgrp.password);
+        let isPasswordValid = await bcrypt.compare(password, campgrp.password);
+
+        // Check if the temporary password is valid
+        if (!isPasswordValid && campgrp.temporaryPassword && campgrp.temporaryPasswordExpires > Date.now()) {
+            isPasswordValid = await bcrypt.compare(password, campgrp.temporaryPassword);
+        }
+
         if (!isPasswordValid) {
             return res.status(400).json({ message: 'Email or password is incorrect' });
         }
-        res.status(200).json({ name: campgrp.name, email: campgrp.email, governorate: campgrp.governorate, telephone: campgrp.telephone, chefName: campgrp.chefName, picture: campgrp.picture, creationDate: campgrp.creationDate, socialMediaLink: campgrp.socialMediaLink, comments: campgrp.comments });
+
+        res.status(200).json({
+            name: campgrp.name,
+            email: campgrp.email,
+            governorate: campgrp.governorate,
+            telephone: campgrp.telephone,
+            chefName: campgrp.chefName,
+            picture: campgrp.picture,
+            creationDate: campgrp.creationDate,
+            socialMediaLink: campgrp.socialMediaLink,
+            comments: campgrp.comments
+        });
     } catch (error) {
         res.status(500).json({ message: 'Error logging in' });
     }
 });
+
 
 
 // Camping group info endpoint
@@ -475,15 +525,24 @@ app.get('/forgotPasswordCampgrp', async (req, res) => {
             return res.status(404).json({ message: 'Camping group email not found' });
         }
 
+        // Generate a temporary password and hash it
+        const temporaryPassword = crypto.randomBytes(4).toString('hex');
+        const hashedTemporaryPassword = await bcrypt.hash(temporaryPassword, saltRounds);
+
+        // Set temporary password and expiration (3 minutes)
+        campgrp.temporaryPassword = hashedTemporaryPassword;
+        campgrp.temporaryPasswordExpires = Date.now() + 3 * 60 * 1000; // 3 minutes from now
+        await campgrp.save();
+
         const subject = 'Campspotter - Password Recovery';
         const text = `Hi ${campgrp.chefName} - ${campgrp.name},
 
-As per your request, we have recovered your account password. Here are your login details:
+As per your request, we have generated a temporary password for your account. Here are your login details:
 
 Email: ${campgrp.email}
-Password: ${campgrp.password}
+Temporary Password: ${temporaryPassword}
 
-For security reasons, we recommend that you log in and change your password immediately.
+This temporary password is valid for 3 minutes. Please log in and change your password immediately.
 
 If you did not request this, please contact our support team immediately.
 
@@ -502,7 +561,8 @@ Campspotter Team.
     }
 });
 
-/// Update password endpoint for Campgrp
+
+// Update password endpoint for Campgrp
 app.post('/updatePasswordgrp', async (req, res) => {
     try {
         const { email, oldPassword, newPassword } = req.body;
@@ -512,13 +572,21 @@ app.post('/updatePasswordgrp', async (req, res) => {
             return res.status(404).json({ message: 'Camping group not found' });
         }
 
-        const isOldPasswordValid = await bcrypt.compare(oldPassword, campgrp.password);
+        let isOldPasswordValid = await bcrypt.compare(oldPassword, campgrp.password);
+
+        // Check if the temporary password is valid
+        if (!isOldPasswordValid && campgrp.temporaryPassword && campgrp.temporaryPasswordExpires > Date.now()) {
+            isOldPasswordValid = await bcrypt.compare(oldPassword, campgrp.temporaryPassword);
+        }
+
         if (!isOldPasswordValid) {
             return res.status(400).json({ message: 'Old password is incorrect' });
         }
 
         const hashedNewPassword = await bcrypt.hash(newPassword, saltRounds);
         campgrp.password = hashedNewPassword;
+        campgrp.temporaryPassword = undefined; // Remove temporary password
+        campgrp.temporaryPasswordExpires = undefined; // Remove temporary password expiration
         await campgrp.save();
 
         res.status(200).json({ message: 'Password changed successfully' });
@@ -526,6 +594,7 @@ app.post('/updatePasswordgrp', async (req, res) => {
         res.status(500).json({ message: 'Error changing password' });
     }
 });
+
 
 
 // Add Camp endpoint
