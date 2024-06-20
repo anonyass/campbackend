@@ -392,8 +392,6 @@ async function sendMail(email, subject, text) {
     }
 }
 
-// Forgot Password endpoint
-
 
 // Forgot Password endpoint
 app.get('/forgotPassword', async (req, res) => {
@@ -440,7 +438,6 @@ Campspotter Team.
             res.status(500).json({ message: 'Error sending email' });
         }
     } catch (error) {
-        console.error('Error handling forgot password request:', error);
         res.status(500).json({ message: 'Error handling forgot password request' });
     }
 });
