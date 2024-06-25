@@ -88,12 +88,11 @@ app.post('/init-register', async (req, res) => {
         console.log(`Stored verification data: ${JSON.stringify(verificationData)}`);
 
         const emailContent = `
-            <p>Hello ${fullName},</p>
-            <p>Thank you for registering with Campspotter. To complete your registration, please use the following verification code:</p>
-            <h2 style="color: #2e6c80;">${verificationCode}</h2>
-            <p>This code is valid for the next 10 minutes. If you did not request this, please ignore this email.</p>
-            <p>Best regards,</p>
-            <p>The Campspotter Team</p>
+            Hello ${fullName},
+            Thank you for registering with Campspotter. To complete your registration, please use the following verification code: ${verificationCode}
+            This code is valid for the next 10 minutes. If you did not request this, please ignore this email.
+           Best regards,
+           The Campspotter Team
         `;
 
         await sendMail(email, 'Campspotter Verification Code', emailContent);
@@ -170,12 +169,12 @@ app.post('/init-registerCampgrp', async (req, res) => {
         console.log(`Stored verification data: ${JSON.stringify(verificationData)}`);
 
         const emailContent = `
-            <p>Hello ${chefName},</p>
-            <p>Thank you for registering your camping group, ${name}, with Campspotter. To complete your registration, please use the following verification code:</p>
-            <h2 style="color: #2e6c80;">${verificationCode}</h2>
-            <p>This code is valid for the next 10 minutes. If you did not request this, please ignore this email.</p>
-            <p>Best regards,</p>
-            <p>The Campspotter Team</p>
+           Hello ${chefName},
+           Thank you for registering your camping group, ${name}, with Campspotter. To complete your registration, please use the following verification code:\
+           ${verificationCode}
+          This code is valid for the next 10 minutes. If you did not request this, please ignore this email.
+          Best regards,
+           The Campspotter Team
         `;
 
         await sendMail(email, 'Campspotter Verification Code', emailContent);
